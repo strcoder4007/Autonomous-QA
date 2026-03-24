@@ -1,0 +1,7 @@
+auth:
+  type: bearer
+  token_env: API_TOKEN
+request_delay_ms: 200
+timeout_seconds: 10
+verify_ssl: true
+seed_params_file: ~/.swaggertest/seed_params.json
