@@ -30,6 +30,7 @@ class Endpoint:
     parameters: list[Parameter] = field(default_factory=list)
     response_codes: list[str] = field(default_factory=list)
     response_schema_200: dict[str, Any] | None = None
+    request_body_schema: dict[str, Any] | None = None
 
 
 class SpecParser:
@@ -105,6 +106,8 @@ class SpecParser:
                 response_codes = list((operation.get("responses") or {}).keys())
                 response_schema_200 = _extract_200_schema(operation, spec)
 
+                request_body_schema = _extract_request_body_schema(operation)
+
                 endpoints.append(
                     Endpoint(
                         method=method.upper(),
@@ -113,13 +116,48 @@ class SpecParser:
                         parameters=list(merged.values()),
                         response_codes=response_codes,
                         response_schema_200=response_schema_200,
+                        request_body_schema=request_body_schema,
                     )
                 )
 
         return endpoints
 
+    @classmethod
+    def from_file(cls, file_path: str) -> "SpecParser":
+        """Load and parse a local OpenAPI spec file (JSON or YAML)."""
+        import pathlib
+
+        p = pathlib.Path(file_path)
+        if not p.is_file():
+            raise FileNotFoundError(f"Spec file not found: {p}")
+
+        text = p.read_text(encoding="utf-8")
+        suffix = p.suffix.lower()
+        if suffix in (".yaml", ".yml"):
+            raw_spec = yaml.safe_load(text)
+        elif suffix == ".json":
+            raw_spec = json.loads(text)
+        else:
+            try:
+                raw_spec = json.loads(text)
+            except json.JSONDecodeError:
+                raw_spec = yaml.safe_load(text)
+
+        obj = object.__new__(cls)
+        obj._swagger_ui_url = None
+        obj.spec_url = str(p.resolve())
+        obj._raw_spec = raw_spec
+
+        file_uri = p.resolve().as_uri()
+        parser = prance.ResolvingParser(file_uri, lazy=True, strict=False)
+        parser.parse()
+        obj._resolved_spec = parser.specification
+
+        obj._validate()
+        return obj
+
     @property
-    def swagger_ui_url(self) -> str:
+    def swagger_ui_url(self) -> str | None:
         return self._swagger_ui_url
 
 
@@ -135,6 +173,19 @@ def _extract_params(raw: list[dict[str, Any]]) -> list[Parameter]:
             )
         )
     return params
+
+
+def _extract_request_body_schema(operation: dict[str, Any]) -> dict[str, Any] | None:
+    body = operation.get("requestBody", {})
+    if not body:
+        # OpenAPI 2.x body parameter
+        for p in operation.get("parameters", []):
+            if p.get("in") == "body":
+                return p.get("schema")
+        return None
+    content = body.get("content", {})
+    json_media = content.get("application/json", {})
+    return json_media.get("schema")
 
 
 def _extract_200_schema(operation: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any] | None:

@@ -20,6 +20,15 @@ class AuthConfig:
 
 
 @dataclass
+class LLMConfig:
+    model: str = "gpt-5-mini"
+    api_key_env: str = "OPENAI_API_KEY"
+    max_tokens: int = 4096
+    temperature: float = 0.2
+    batch_size: int = 5
+
+
+@dataclass
 class Config:
     base_url: str = ""
     auth: AuthConfig = field(default_factory=AuthConfig)
@@ -27,6 +36,7 @@ class Config:
     timeout_seconds: int = 10
     verify_ssl: bool = True
     seed_params: dict[str, str] = field(default_factory=dict)
+    llm: LLMConfig = field(default_factory=LLMConfig)
 
 
 def load_config(
@@ -50,12 +60,9 @@ def load_config(
         env_data = dotenv_values(env_path)
 
     # --- Resolve base_url ---
+    # base_url is not required at config-load time; commands that need it (e.g. run, generate --execute)
+    # must validate its presence themselves before making requests.
     base_url = cli_base_url or env_data.get("BASE_URL") or yaml_data.get("base_url") or ""
-    if not base_url:
-        raise RuntimeError(
-            "BASE_URL is required but was not found in CLI flags, .env, or .swaggertest.yaml. "
-            "Set it explicitly to avoid accidentally hitting production."
-        )
 
     # --- Resolve auth ---
     auth_yaml = yaml_data.get("auth", {})
@@ -73,11 +80,22 @@ def load_config(
         with open(seed_params_path) as f:
             seed_params = json.load(f)
 
+    # --- Resolve LLM config ---
+    llm_yaml = yaml_data.get("llm", {})
+    llm = LLMConfig(
+        model=llm_yaml.get("model", "gpt-5-mini"),
+        api_key_env=llm_yaml.get("api_key_env", "OPENAI_API_KEY"),
+        max_tokens=llm_yaml.get("max_tokens", 4096),
+        temperature=llm_yaml.get("temperature", 0.2),
+        batch_size=llm_yaml.get("batch_size", 5),
+    )
+
     return Config(
-        base_url=base_url.rstrip("/"),
+        base_url=base_url.rstrip("/") if base_url else "",
         auth=auth,
         request_delay_ms=yaml_data.get("request_delay_ms", 0),
         timeout_seconds=yaml_data.get("timeout_seconds", 10),
         verify_ssl=yaml_data.get("verify_ssl", True),
         seed_params=seed_params,
+        llm=llm,
     )
